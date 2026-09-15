@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; background-color: #f4f4f5; }
+        .spinner {
+            border: 3px solid rgba(0,0,0,0.1);
+            width: 24px; height: 24px;
+            border-radius: 50%;
+            border-left-color: #09f;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="p-8 text-slate-800">
+
+    <div class="max-w-3xl mx-auto">
+        <h1 class="text-3xl font-bold mb-2">Monitor de Servicios</h1>
+        <p class="text-slate-500 mb-8">Estado de la aplicación en tiempo real (se actualiza cada 15 segundos)</p>
+        
+        <div id="services" class="grid gap-4 sm:grid-cols-2">
+            <!-- Cards will be injected here -->
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "https://produccionrolonapp.azurewebsites.net/backend-api";
+        const FRONTEND_URL = "https://produccionrolonapp.azurewebsites.net";
+
+        let servicesData = [
+            { id: 'backend', name: 'Backend API', url: `${API_URL}/health`, status: 'loading', details: '' },
+            { id: 'database', name: 'Database (PostgreSQL)', url: `${API_URL}/health/ready`, status: 'loading', details: '' },
+            { id: 'frontend', name: 'Frontend (Next.js)', url: `${FRONTEND_URL}/api/health`, status: 'loading', details: '' }
+        ];
+
+        function render() {
+            const container = document.getElementById('services');
+            container.innerHTML = servicesData.map(s => {
+                let icon = `<div class="spinner"></div>`;
+                if (s.status === 'up') icon = `<svg class="w-8 h-8 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+                if (s.status === 'down') icon = `<svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+
+                return `
+                    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex items-center justify-between">
+                        <div class="flex flex-col">
+                            <span class="font-bold text-slate-800">${s.name}</span>
+                            <span class="text-xs text-slate-500 font-mono mt-1">${s.details || 'Revisando...'}</span>
+                        </div>
+                        <div>${icon}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function checkHealth() {
+            for (let i = 0; i < servicesData.length; i++) {
+                const service = servicesData[i];
+                try {
+                    const res = await fetch(service.url);
+                    const isJson = res.headers.get("content-type")?.includes("application/json");
+                    
+                    if (isJson) {
+                        const data = await res.json();
+                        if (service.id === 'database') {
+                            const dbInfo = data.info?.find(info => info.key === "database");
+                            service.status = data.status === "Healthy" ? "up" : "down";
+                            service.details = dbInfo ? `Status: ${dbInfo.status}` : `Status: ${data.status}`;
+                        } else if (service.id === 'backend') {
+                            service.status = data.status === "Healthy" ? "up" : "down";
+                            service.details = `Status: ${data.status} | Duration: ${data.duration}`;
+                        } else if (service.id === 'frontend') {
+                            service.status = "up";
+                            service.details = `Status: ${data.status} | ${new Date(data.timestamp).toLocaleTimeString()}`;
+                        }
+                    } else {
+                        service.status = res.ok ? "up" : "down";
+                        service.details = res.ok ? "Healthy" : `Error: ${res.status}`;
+                    }
+                } catch (err) {
+                    service.status = "down";
+                    service.details = err.message;
+                }
+            }
+            render();
+        }
+
+        // Run immediately
+        render();
+        checkHealth();
+        
+        // Check every 15 seconds
+        setInterval(checkHealth, 15000);
+    </script>
+</body>
+</html>
